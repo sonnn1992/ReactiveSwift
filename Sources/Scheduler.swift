@@ -66,6 +66,10 @@ public protocol DateSchedulerProtocol: SchedulerProtocol {
 
 /// A scheduler that performs all work synchronously.
 public final class ImmediateScheduler: SchedulerProtocol {
+	/// A shared instance of `ImmediateScheduler`.
+	public static let shared = ImmediateScheduler()
+
+	/// Create a scheduler that performs all work synchronously.
 	public init() {}
 
 	/// Immediately calls passed in `action`.

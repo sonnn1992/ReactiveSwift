@@ -306,9 +306,11 @@ class PropertySpec: QuickSpec {
 
 					property.signal.observeValues { value in
 						values.append(value)
+						expect(property.value) == value
 
 						if value < level {
 							property.value = value + 1
+							expect(property.value) == value + 1
 						}
 					}
 
@@ -325,9 +327,11 @@ class PropertySpec: QuickSpec {
 
 					property.producer.startWithValues { value in
 						values.append(value)
+						expect(property.value) == value
 
 						if value < level {
 							property.value = value + 1
+							expect(property.value) == value + 1
 						}
 					}
 
@@ -343,9 +347,11 @@ class PropertySpec: QuickSpec {
 
 					property.signal.observeValues { value in
 						values.append(value)
+						expect(property.value) == value
 
 						if value < level {
 							property.value = value + 1
+							expect(property.value) == value + 1
 						}
 					}
 
@@ -366,9 +372,11 @@ class PropertySpec: QuickSpec {
 					property.withValue { _ in
 						property.producer.startWithValues { value in
 							values.append(value)
+							expect(property.value) == value
 
 							if value < level {
 								property.value = value + 1
+								expect(property.value) == value + 1
 							}
 						}
 					}
