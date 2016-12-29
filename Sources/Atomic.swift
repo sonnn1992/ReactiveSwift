@@ -149,6 +149,56 @@ final class PosixThreadMutex: NSLocking {
 	}
 }
 
+internal final class CountingRecursiveLock {
+	private let _lock: NSRecursiveLock
+	private var entranceCount: UInt
+	private var readLockCount: UInt
+	private var reentrancyDisabled = false
+
+	var recursiveWriteDepth: UInt {
+		return entranceCount - readLockCount
+	}
+
+	init(name: String? = nil) {
+		_lock = NSRecursiveLock()
+		_lock.name = name
+		entranceCount = 0
+		readLockCount = 0
+	}
+
+	func readOnlyLock() {
+		_lock.lock()
+		entranceCount += 1
+		readLockCount += 1
+		precondition(!reentrancyDisabled, "Reentrancy is detected in a reentrancy disabled action.")
+	}
+
+	func readOnlyUnlock() {
+		readLockCount -= 1
+		entranceCount -= 1
+		_lock.unlock()
+	}
+
+	func mutatingLock() {
+		_lock.lock()
+		entranceCount += 1
+		precondition(!reentrancyDisabled, "Reentrancy is detected in a reentrancy disabled action.")
+	}
+
+	func mutatingUnlock() {
+		entranceCount -= 1
+		_lock.unlock()
+	}
+
+	func unsafeDisableReentrancy<Result>(_ action: () throws -> Result) rethrows -> Result {
+		reentrancyDisabled = true
+		let result = try action()
+		reentrancyDisabled = false
+
+		return result
+	}
+}
+
 /// An atomic variable.
 public final class Atomic<Value>: AtomicProtocol {
 	private let lock: PosixThreadMutex
@@ -186,60 +236,6 @@ public final class Atomic<Value>: AtomicProtocol {
 	/// - returns: The result of the action.
 	@discardableResult
 	public func withValue<Result>(_ action: (Value) throws -> Result) rethrows -> Result {
-		lock.lock()
-		defer { lock.unlock() }
-
-		return try action(_value)
-	}
-}
-
-
-/// An atomic variable which uses a recursive lock.
-internal final class RecursiveAtomic<Value>: AtomicProtocol {
-	private let lock: NSRecursiveLock
-	private var _value: Value
-	private let didSetObserver: ((Value) -> Void)?
-
-	/// Initialize the variable with the given initial value.
-	/// 
-	/// - parameters:
-	///   - value: Initial value for `self`.
-	///   - name: An optional name used to create the recursive lock.
-	///   - action: An optional closure which would be invoked every time the
-	///             value of `self` is mutated.
-	internal init(_ value: Value, name: StaticString? = nil, didSet action: ((Value) -> Void)? = nil) {
-		_value = value
-		lock = NSRecursiveLock()
-		lock.name = name.map(String.init(describing:))
-		didSetObserver = action
-	}
-
-	/// Atomically modifies the variable.
-	///
-	/// - parameters:
-	///   - action: A closure that takes the current value.
-	///
-	/// - returns: The result of the action.
-	@discardableResult
-	func modify<Result>(_ action: (inout Value) throws -> Result) rethrows -> Result {
-		lock.lock()
-		defer {
-			didSetObserver?(_value)
-			lock.unlock()
-		}
-
-		return try action(&_value)
-	}
-	
-	/// Atomically perform an arbitrary action using the current value of the
-	/// variable.
-	///
-	/// - parameters:
-	///   - action: A closure that takes the current value.
-	///
-	/// - returns: The result of the action.
-	@discardableResult
-	func withValue<Result>(_ action: (Value) throws -> Result) rethrows -> Result {
 		lock.lock()
 		defer { lock.unlock() }
 

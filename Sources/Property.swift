@@ -552,19 +552,45 @@ public final class Property<Value>: PropertyProtocol {
 public final class MutableProperty<Value>: MutablePropertyProtocol {
 	private let token: Lifetime.Token
 	private let observer: Signal<Value, NoError>.Observer
-	private let atomic: RecursiveAtomic<Value>
+	private let lock: CountingRecursiveLock
+	private let storage: Storage<Value>
+
+	private var recursiveSetFIFO: Storage<[Value]>
 
 	/// The current value of the property.
 	///
 	/// Setting this to a new value will notify all observers of `signal`, or
 	/// signals created using `producer`.
+	///
+	/// - note: Both the getter and the setter can be called recursively.
 	public var value: Value {
 		get {
-			return atomic.withValue { $0 }
+			lock.readOnlyLock()
+			let value = storage.value
+			lock.readOnlyUnlock()
+			return value
 		}
 
 		set {
-			swap(newValue)
+			lock.mutatingLock()
+			storage.value = newValue
+
+			// When a producer starts or `withValue` is called, the entrance count
+			// would be incremented, but the property signal would remain uncontended
+			// as no mutation occurs as a result of these actions themselves. So the
+			// entrance count needs to be offset, so that mutations are correctly
+			// tracked.
+			if lock.recursiveWriteDepth == 1 {
+				observer.send(value: newValue)
+
+				while !recursiveSetFIFO.value.isEmpty {
+					observer.send(value: recursiveSetFIFO.value.removeFirst())
+				}
+			} else {
+				recursiveSetFIFO.value.append(newValue)
+			}
+
+			lock.mutatingUnlock()
 		}
 	}
 
@@ -579,16 +605,49 @@ public final class MutableProperty<Value>: MutablePropertyProtocol {
 	/// followed by all changes over time, then complete when the property has
 	/// deinitialized.
 	public var producer: SignalProducer<Value, NoError> {
-		return SignalProducer { [atomic, weak self] producerObserver, producerDisposable in
-			atomic.withValue { value in
-				if let strongSelf = self {
-					producerObserver.send(value: value)
-					producerDisposable += strongSelf.signal.observe(producerObserver)
-				} else {
-					producerObserver.send(value: value)
-					producerObserver.sendCompleted()
+		return SignalProducer { [storage, lock, weak self] producerObserver, producerDisposable in
+			lock.readOnlyLock()
+
+			if let strongSelf = self {
+				// FIXME: Remove the relay when #140 is landed.
+				// https://github.com/ReactiveCocoa/ReactiveSwift/pull/140
+				var recursiveSetFIFO: Storage<[Value]>? = Storage([])
+				let (relaySignal, relayObserver) = Signal<Value, NoError>.pipe()
+
+				// When the producer is starting, `relaySignal` is congested by the
+				// replayed value, so all the recursive events from `signal` must be
+				// queued to the FIFO.
+				var congestionFreeDepth: UInt = 0
+
+				producerDisposable += strongSelf.signal.observe { event in
+					switch event {
+					case .value:
+						if let recursiveSetFIFO = recursiveSetFIFO, lock.recursiveWriteDepth != congestionFreeDepth {
+							recursiveSetFIFO.value.append(event.value!)
+						} else {
+							relayObserver.action(event)
+						}
+
+					case .completed, .failed, .interrupted:
+						relayObserver.action(event)
+					}
 				}
+
+				producerDisposable += relaySignal.signal.observe(producerObserver)
+				relayObserver.send(value: storage.value)
+
+				while !recursiveSetFIFO!.value.isEmpty {
+					relayObserver.send(value: recursiveSetFIFO!.value.removeFirst())
+				}
+
+				recursiveSetFIFO = nil
+				congestionFreeDepth = 1
+			} else {
+				producerObserver.send(value: storage.value)
+				producerObserver.sendCompleted()
 			}
+
+			lock.readOnlyUnlock()
 		}
 	}
 
@@ -597,16 +656,15 @@ public final class MutableProperty<Value>: MutablePropertyProtocol {
 	/// - parameters:
 	///   - initialValue: Starting value for the mutable property.
 	public init(_ initialValue: Value) {
+		recursiveSetFIFO = Storage([])
+
 		(signal, observer) = Signal.pipe()
+
 		token = Lifetime.Token()
 		lifetime = Lifetime(token)
 
-		/// Need a recursive lock around `value` to allow recursive access to
-		/// `value`. Note that recursive sets will still deadlock because the
-		/// underlying producer prevents sending recursive events.
-		atomic = RecursiveAtomic(initialValue,
-		                          name: "org.reactivecocoa.ReactiveSwift.MutableProperty",
-		                          didSet: observer.send(value:))
+		lock = CountingRecursiveLock(name: "org.reactivecocoa.ReactiveSwift.MutableProperty")
+		storage = Storage(initialValue)
 	}
 
 	/// Atomically replaces the contents of the variable.
@@ -617,10 +675,18 @@ public final class MutableProperty<Value>: MutablePropertyProtocol {
 	/// - returns: The previous property value.
 	@discardableResult
 	public func swap(_ newValue: Value) -> Value {
-		return atomic.swap(newValue)
+		return modify { value in
+			let old = value
+			value = newValue
+			return old
+		}
 	}
 
 	/// Atomically modifies the variable.
+	///
+	/// - note: Mutations should only be made through the `inout` reference.
+	///         Any nested invocation to mutating methods would raise an
+	///         assertion.
 	///
 	/// - parameters:
 	///   - action: A closure that accepts old property value and returns a new
@@ -629,7 +695,24 @@ public final class MutableProperty<Value>: MutablePropertyProtocol {
 	/// - returns: The result of the action.
 	@discardableResult
 	public func modify<Result>(_ action: (inout Value) throws -> Result) rethrows -> Result {
-		return try atomic.modify(action)
+		lock.mutatingLock()
+
+		// Mutating a variable when it is passed as an `inout` parameter leads to
+		// undefined behavior. So reentrancy has to be disabled.
+		let result = try lock.unsafeDisableReentrancy { try action(&storage.value) }
+
+		if lock.recursiveWriteDepth == 1 {
+			observer.send(value: storage.value)
+
+			while !recursiveSetFIFO.value.isEmpty {
+				observer.send(value: recursiveSetFIFO.value.removeFirst())
+			}
+		} else {
+			recursiveSetFIFO.value.append(storage.value)
+		}
+
+		lock.mutatingUnlock()
+		return result
 	}
 
 	/// Atomically performs an arbitrary action using the current value of the
@@ -641,7 +724,10 @@ public final class MutableProperty<Value>: MutablePropertyProtocol {
 	/// - returns: the result of the action.
 	@discardableResult
 	public func withValue<Result>(action: (Value) throws -> Result) rethrows -> Result {
-		return try atomic.withValue(action)
+		lock.readOnlyLock()
+		let result = try action(storage.value)
+		lock.readOnlyUnlock()
+		return result
 	}
 
 	deinit {
