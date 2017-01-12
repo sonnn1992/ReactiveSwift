@@ -62,7 +62,11 @@ public final class Signal<Value, Error: Swift.Error> {
 		sendLock = NSLock()
 		sendLock.name = "org.reactivecocoa.ReactiveSwift.Signal.sendLock"
 
-		let observer = Observer { [weak self] event in
+		let downstreamEventHandler: (SignalDownstreamEvent) -> Void = { event in
+
+		}
+
+		let observer = Observer(context: .eventEmitter(downstreamEventHandler)) { [weak self] event in
 			guard let signal = self else {
 				return
 			}
@@ -519,6 +523,24 @@ extension SignalProtocol where Error == NoError {
 }
 
 extension SignalProtocol {
+	public func transform<U, E: Swift.Error>(
+		start: ((Observer<U, E>) -> Disposable?)? = nil,
+		_ action: @escaping (Event<Value, Error>, Observer<U, E>) -> Void
+	) -> Signal<U, E> {
+		return Signal { observer in
+			let d1 = start?(observer)
+
+			let d2 = self.observe(Observer(context: observer.context) { event in
+				action(event, observer)
+			})
+
+			return ActionDisposable {
+				d1?.dispose()
+				d2?.dispose()
+			}
+		}
+	}
+
 	/// Map each value in the signal to a new value.
 	///
 	/// - parameters:
@@ -527,10 +549,8 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that will send new values.
 	public func map<U>(_ transform: @escaping (Value) -> U) -> Signal<U, Error> {
-		return Signal { observer in
-			return self.observe { event in
-				observer.action(event.map(transform))
-			}
+		return self.transform { event, observer in
+			observer.action(event.map(transform))
 		}
 	}
 
@@ -542,10 +562,8 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that will send new type of errors.
 	public func mapError<F>(_ transform: @escaping (Error) -> F) -> Signal<Value, F> {
-		return Signal { observer in
-			return self.observe { event in
-				observer.action(event.mapError(transform))
-			}
+		return self.transform { event, observer in
+			observer.action(event.mapError(transform))
 		}
 	}
 
@@ -558,16 +576,14 @@ extension SignalProtocol {
 	/// - returns: A signal that will send only the values passing the given
 	///            predicate.
 	public func filter(_ predicate: @escaping (Value) -> Bool) -> Signal<Value, Error> {
-		return Signal { observer in
-			return self.observe { (event: Event<Value, Error>) -> Void in
-				guard let value = event.value else {
-					observer.action(event)
-					return
-				}
+		return self.transform { event, observer in
+			guard let value = event.value else {
+				observer.action(event)
+				return
+			}
 
-				if predicate(value) {
-					observer.send(value: value)
-				}
+			if predicate(value) {
+				observer.send(value: value)
 			}
 		}
 	}
@@ -594,29 +610,27 @@ extension SignalProtocol {
 	/// - returns: A signal that will yield the first `count` values from `self`
 	public func take(first count: Int) -> Signal<Value, Error> {
 		precondition(count >= 0)
+		var taken = 0
 
-		return Signal { observer in
+		return self.transform(start: { observer in
 			if count == 0 {
 				observer.sendCompleted()
-				return nil
 			}
 
-			var taken = 0
+			return nil
+		}) { event, observer in
+			guard let value = event.value else {
+				observer.action(event)
+				return
+			}
 
-			return self.observe { event in
-				guard let value = event.value else {
-					observer.action(event)
-					return
-				}
+			if taken < count {
+				taken += 1
+				observer.send(value: value)
+			}
 
-				if taken < count {
-					taken += 1
-					observer.send(value: value)
-				}
-
-				if taken == count {
-					observer.sendCompleted()
-				}
+			if taken == count {
+				observer.sendCompleted()
 			}
 		}
 	}
@@ -725,27 +739,25 @@ extension SignalProtocol {
 	///            `self` completes, forwards them as a single array and
 	///            complets.
 	public func collect(_ predicate: @escaping (_ values: [Value]) -> Bool) -> Signal<[Value], Error> {
-		return Signal { observer in
-			let state = CollectState<Value>()
+		let state = CollectState<Value>()
 
-			return self.observe { event in
-				switch event {
-				case let .value(value):
-					state.append(value)
-					if predicate(state.values) {
-						observer.send(value: state.values)
-						state.flush()
-					}
-				case .completed:
-					if !state.isEmpty {
-						observer.send(value: state.values)
-					}
-					observer.sendCompleted()
-				case let .failed(error):
-					observer.send(error: error)
-				case .interrupted:
-					observer.sendInterrupted()
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				state.append(value)
+				if predicate(state.values) {
+					observer.send(value: state.values)
+					state.flush()
 				}
+			case .completed:
+				if !state.isEmpty {
+					observer.send(value: state.values)
+				}
+				observer.sendCompleted()
+			case let .failed(error):
+				observer.send(error: error)
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}
@@ -790,27 +802,25 @@ extension SignalProtocol {
 	///            predicate which matches the values collected and the next
 	///            value.
 	public func collect(_ predicate: @escaping (_ values: [Value], _ value: Value) -> Bool) -> Signal<[Value], Error> {
-		return Signal { observer in
-			let state = CollectState<Value>()
+		let state = CollectState<Value>()
 
-			return self.observe { event in
-				switch event {
-				case let .value(value):
-					if predicate(state.values, value) {
-						observer.send(value: state.values)
-						state.flush()
-					}
-					state.append(value)
-				case .completed:
-					if !state.isEmpty {
-						observer.send(value: state.values)
-					}
-					observer.sendCompleted()
-				case let .failed(error):
-					observer.send(error: error)
-				case .interrupted:
-					observer.sendInterrupted()
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				if predicate(state.values, value) {
+					observer.send(value: state.values)
+					state.flush()
 				}
+				state.append(value)
+			case .completed:
+				if !state.isEmpty {
+					observer.send(value: state.values)
+				}
+				observer.sendCompleted()
+			case let .failed(error):
+				observer.send(error: error)
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}
@@ -823,11 +833,9 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that will yield `self` values on provided scheduler.
 	public func observe(on scheduler: SchedulerProtocol) -> Signal<Value, Error> {
-		return Signal { observer in
-			return self.observe { event in
-				scheduler.schedule {
-					observer.action(event)
-				}
+		return self.transform { event, observer in
+			scheduler.schedule {
+				observer.action(event)
 			}
 		}
 	}
@@ -922,19 +930,17 @@ extension SignalProtocol {
 	public func delay(_ interval: TimeInterval, on scheduler: DateSchedulerProtocol) -> Signal<Value, Error> {
 		precondition(interval >= 0)
 
-		return Signal { observer in
-			return self.observe { event in
-				switch event {
-				case .failed, .interrupted:
-					scheduler.schedule {
-						observer.action(event)
-					}
+		return self.transform { event, observer in
+			switch event {
+			case .failed, .interrupted:
+				scheduler.schedule {
+					observer.action(event)
+				}
 
-				case .value, .completed:
-					let date = scheduler.currentDate.addingTimeInterval(interval)
-					scheduler.schedule(after: date) {
-						observer.action(event)
-					}
+			case .value, .completed:
+				let date = scheduler.currentDate.addingTimeInterval(interval)
+				scheduler.schedule(after: date) {
+					observer.action(event)
 				}
 			}
 		}
@@ -954,15 +960,13 @@ extension SignalProtocol {
 			return signal
 		}
 
-		return Signal { observer in
-			var skipped = 0
+		var skipped = 0
 
-			return self.observe { event in
-				if case .value = event, skipped < count {
-					skipped += 1
-				} else {
-					observer.action(event)
-				}
+		return self.transform { event, observer in
+			if case .value = event, skipped < count {
+				skipped += 1
+			} else {
+				observer.action(event)
 			}
 		}
 	}
@@ -979,20 +983,18 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that sends events as its values.
 	public func materialize() -> Signal<Event<Value, Error>, NoError> {
-		return Signal { observer in
-			return self.observe { event in
-				observer.send(value: event)
+		return self.transform { event, observer in
+			observer.send(value: event)
 
-				switch event {
-				case .interrupted:
-					observer.sendInterrupted()
+			switch event {
+			case .interrupted:
+				observer.sendInterrupted()
 
-				case .completed, .failed:
-					observer.sendCompleted()
+			case .completed, .failed:
+				observer.sendCompleted()
 
-				case .value:
-					break
-				}
+			case .value:
+				break
 			}
 		}
 	}
@@ -1004,21 +1006,19 @@ extension SignalProtocol where Value: EventProtocol, Error == NoError {
 	///
 	/// - returns: A signal that sends values carried by `self` events.
 	public func dematerialize() -> Signal<Value.Value, Value.Error> {
-		return Signal<Value.Value, Value.Error> { observer in
-			return self.observe { event in
-				switch event {
-				case let .value(innerEvent):
-					observer.action(innerEvent.event)
+		return self.transform { event, observer in
+			switch event {
+			case let .value(innerEvent):
+				observer.action(innerEvent.event)
 
-				case .failed:
-					fatalError("NoError is impossible to construct")
+			case .failed:
+				fatalError("NoError is impossible to construct")
 
-				case .completed:
-					observer.sendCompleted()
+			case .completed:
+				observer.sendCompleted()
 
-				case .interrupted:
-					observer.sendInterrupted()
-				}
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}
@@ -1379,15 +1379,13 @@ extension SignalProtocol {
 	/// - returns: A signal that sends accumulated value each time `self` emits
 	///            own value.
 	public func scan<U>(_ initial: U, _ combine: @escaping (U, Value) -> U) -> Signal<U, Error> {
-		return Signal { observer in
-			var accumulator = initial
+		var accumulator = initial
 
-			return self.observe { event in
-				observer.action(event.map { value in
-					accumulator = combine(accumulator, value)
-					return accumulator
-				})
-			}
+		return self.transform { event, observer in
+			observer.action(event.map { value in
+				accumulator = combine(accumulator, value)
+				return accumulator
+			})
 		}
 	}
 }
@@ -1443,20 +1441,18 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that sends only forwarded values from `self`.
 	public func skip(while predicate: @escaping (Value) -> Bool) -> Signal<Value, Error> {
-		return Signal { observer in
-			var shouldSkip = true
+		var shouldSkip = true
 
-			return self.observe { event in
-				switch event {
-				case let .value(value):
-					shouldSkip = shouldSkip && predicate(value)
-					if !shouldSkip {
-						fallthrough
-					}
-
-				case .failed, .completed, .interrupted:
-					observer.action(event)
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				shouldSkip = shouldSkip && predicate(value)
+				if !shouldSkip {
+					fallthrough
 				}
+
+			case .failed, .completed, .interrupted:
+				observer.action(event)
 			}
 		}
 	}
@@ -1506,30 +1502,28 @@ extension SignalProtocol {
 	/// - returns: A signal that receives up to `count` values from `self`
 	///            after `self` completes.
 	public func take(last count: Int) -> Signal<Value, Error> {
-		return Signal { observer in
-			var buffer: [Value] = []
-			buffer.reserveCapacity(count)
+		var buffer: [Value] = []
+		buffer.reserveCapacity(count)
 
-			return self.observe { event in
-				switch event {
-				case let .value(value):
-					// To avoid exceeding the reserved capacity of the buffer, 
-					// we remove then add. Remove elements until we have room to 
-					// add one more.
-					while (buffer.count + 1) > count {
-						buffer.remove(at: 0)
-					}
-					
-					buffer.append(value)
-				case let .failed(error):
-					observer.send(error: error)
-				case .completed:
-					buffer.forEach(observer.send(value:))
-					
-					observer.sendCompleted()
-				case .interrupted:
-					observer.sendInterrupted()
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				// To avoid exceeding the reserved capacity of the buffer, 
+				// we remove then add. Remove elements until we have room to 
+				// add one more.
+				while (buffer.count + 1) > count {
+					buffer.remove(at: 0)
 				}
+				
+				buffer.append(value)
+			case let .failed(error):
+				observer.send(error: error)
+			case .completed:
+				buffer.forEach(observer.send(value:))
+				
+				observer.sendCompleted()
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}
@@ -1545,13 +1539,11 @@ extension SignalProtocol {
 	/// - returns: A signal that sends events until the values sent by `self`
 	///            pass the given `predicate`.
 	public func take(while predicate: @escaping (Value) -> Bool) -> Signal<Value, Error> {
-		return Signal { observer in
-			return self.observe { event in
-				if let value = event.value, !predicate(value) {
-					observer.sendCompleted()
-				} else {
-					observer.action(event)
-				}
+		return self.transform { event, observer in
+			if let value = event.value, !predicate(value) {
+				observer.sendCompleted()
+			} else {
+				observer.action(event)
 			}
 		}
 	}
@@ -1869,23 +1861,20 @@ extension SignalProtocol {
 	///
 	/// - returns: A signal that sends unique values during its lifetime.
 	public func uniqueValues<Identity: Hashable>(_ transform: @escaping (Value) -> Identity) -> Signal<Value, Error> {
-		return Signal { observer in
-			var seenValues: Set<Identity> = []
-			
-			return self
-				.observe { event in
-					switch event {
-					case let .value(value):
-						let identity = transform(value)
-						if !seenValues.contains(identity) {
-							seenValues.insert(identity)
-							fallthrough
-						}
-						
-					case .failed, .completed, .interrupted:
-						observer.action(event)
-					}
+		var seenValues: Set<Identity> = []
+
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				let identity = transform(value)
+				if !seenValues.contains(identity) {
+					seenValues.insert(identity)
+					fallthrough
 				}
+				
+			case .failed, .completed, .interrupted:
+				observer.action(event)
+			}
 		}
 	}
 }
@@ -2145,18 +2134,16 @@ extension SignalProtocol where Error == NoError {
 	///
 	/// - returns: A signal that has an instantiatable `ErrorType`.
 	public func promoteErrors<F: Swift.Error>(_: F.Type) -> Signal<Value, F> {
-		return Signal { observer in
-			return self.observe { event in
-				switch event {
-				case let .value(value):
-					observer.send(value: value)
-				case .failed:
-					fatalError("NoError is impossible to construct")
-				case .completed:
-					observer.sendCompleted()
-				case .interrupted:
-					observer.sendInterrupted()
-				}
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				observer.send(value: value)
+			case .failed:
+				fatalError("NoError is impossible to construct")
+			case .completed:
+				observer.sendCompleted()
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}
@@ -2246,21 +2233,19 @@ extension SignalProtocol {
 	/// - returns: A signal that sends mapped values from `self` if returned
 	///            `Result` is `success`ful, `failed` events otherwise.
 	public func attemptMap<U>(_ operation: @escaping (Value) -> Result<U, Error>) -> Signal<U, Error> {
-		return Signal { observer in
-			self.observe { event in
-				switch event {
-				case let .value(value):
-					operation(value).analysis(
-						ifSuccess: observer.send(value:),
-						ifFailure: observer.send(error:)
-					)
-				case let .failed(error):
-					observer.send(error: error)
-				case .completed:
-					observer.sendCompleted()
-				case .interrupted:
-					observer.sendInterrupted()
-				}
+		return self.transform { event, observer in
+			switch event {
+			case let .value(value):
+				operation(value).analysis(
+					ifSuccess: observer.send(value:),
+					ifFailure: observer.send(error:)
+				)
+			case let .failed(error):
+				observer.send(error: error)
+			case .completed:
+				observer.sendCompleted()
+			case .interrupted:
+				observer.sendInterrupted()
 			}
 		}
 	}

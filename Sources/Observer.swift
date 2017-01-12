@@ -29,8 +29,21 @@ public protocol ObserverProtocol {
 public final class Observer<Value, Error: Swift.Error> {
 	public typealias Action = (Event<Value, Error>) -> Void
 
+	internal let context: ObserverContext
+
 	/// An action that will be performed upon arrival of the event.
 	public let action: Action
+
+	/// An initializer that accepts a closure accepting an event for the
+	/// observer.
+	///
+	/// - parameters:
+	///   - context: The context of the observer.
+	///   - action: A closure to lift over received event.
+	internal init(context: ObserverContext, _ action: @escaping Action) {
+		self.context = context
+		self.action = action
+	}
 
 	/// An initializer that accepts a closure accepting an event for the 
 	/// observer.
@@ -38,6 +51,7 @@ public final class Observer<Value, Error: Swift.Error> {
 	/// - parameters:
 	///   - action: A closure to lift over received event.
 	public init(_ action: @escaping Action) {
+		self.context = .anonymous
 		self.action = action
 	}
 
@@ -101,4 +115,15 @@ extension Observer: ObserverProtocol {
 	public func sendInterrupted() {
 		action(.interrupted)
 	}
+}
+
+internal enum ObserverContext {
+	case anonymous
+	case eventEmitter((SignalDownstreamEvent) -> Void)
+}
+
+internal enum SignalDownstreamEvent {
+	case interrupted
+	// case deactivated
+	// case activated
 }
