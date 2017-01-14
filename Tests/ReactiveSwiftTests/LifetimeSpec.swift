@@ -1,11 +1,13 @@
 import Quick
 import Nimble
-import ReactiveSwift
+@testable import ReactiveSwift
 import Result
 
 final class LifetimeSpec: QuickSpec {
 	override func spec() {
 		describe("Lifetime") {
+			// FIXME: Remove these test cases when the deprecated `Lifetime.ended`
+			//        is removed.
 			it("should complete its lifetime ended signal when the it deinitializes") {
 				let object = MutableReference(TestObject())
 
@@ -18,6 +20,8 @@ final class LifetimeSpec: QuickSpec {
 				expect(isCompleted) == true
 			}
 
+			// FIXME: Remove these test cases when the deprecated `Lifetime.ended`
+			//        is removed.
 			it("should complete its lifetime ended signal even if the lifetime object is being retained") {
 				let object = MutableReference(TestObject())
 				let lifetime = object.value!.lifetime
@@ -37,13 +41,45 @@ final class LifetimeSpec: QuickSpec {
 
 				(lifetime, token) = Lifetime.makeLifetime()
 
-				var isCompleted = false
-				lifetime.ended.observeCompleted { isCompleted = true }
+				var isEnded = false
+				lifetime.observeEnded { isEnded = true }
 
 				token = Lifetime.Token()
 				_ = token
 
-				expect(isCompleted) == true
+				expect(isEnded) == true
+			}
+
+			it("should notify its observers when the underlying token deinitializes") {
+				let object = MutableReference(TestObject())
+
+				var isEnded = false
+
+				object.value!.lifetime.observeEnded { isEnded = true }
+				expect(isEnded) == false
+
+				object.value = nil
+				expect(isEnded) == true
+			}
+
+			it("should notify its observers of the deinitialization of the underlying token even if the `Lifetime` object is retained") {
+				let object = MutableReference(TestObject())
+				let lifetime = object.value!.lifetime
+
+				var isEnded = false
+
+				lifetime.observeEnded { isEnded = true }
+				expect(isEnded) == false
+
+				object.value = nil
+				expect(isEnded) == true
+			}
+
+			it("should notify its observers of its deinitialization if it has already ended") {
+				var isEnded = false
+
+				Lifetime.empty.observeEnded { isEnded = true }
+				expect(isEnded) == true
 			}
 		}
 	}

@@ -44,18 +44,18 @@ public final class Observer<Value, Error: Swift.Error> {
 	/// An initializer that accepts closures for different event types.
 	///
 	/// - parameters:
-	///   - value: Optional closure executed when a `value` event is observed.
-	///   - failed: Optional closure that accepts an `Error` parameter when a
-	///             failed event is observed.
-	///   - completed: Optional closure executed when a `completed` event is
-	///                observed.
-	///   - interruped: Optional closure executed when an `interrupted` event is
-	///                 observed.
+	///   - value: An optional closure that handles `value` events.
+	///   - failed: An optional closure that handles a `failed` event.
+	///   - completed: An optional closure that handles a `completed` event.
+	///   - interruped: An optional closure that handles an `interrupted` event.
+	///   - terminated: An optional closure that is invoked whenever a terminal
+	///                 event is received.
 	public convenience init(
 		value: ((Value) -> Void)? = nil,
 		failed: ((Error) -> Void)? = nil,
 		completed: (() -> Void)? = nil,
-		interrupted: (() -> Void)? = nil
+		interrupted: (() -> Void)? = nil,
+		terminated: (() -> Void)? = nil
 	) {
 		self.init { event in
 			switch event {
@@ -64,12 +64,15 @@ public final class Observer<Value, Error: Swift.Error> {
 
 			case let .failed(error):
 				failed?(error)
+				terminated?()
 
 			case .completed:
 				completed?()
+				terminated?()
 
 			case .interrupted:
 				interrupted?()
+				terminated?()
 			}
 		}
 	}

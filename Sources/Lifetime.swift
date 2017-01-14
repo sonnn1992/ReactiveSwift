@@ -19,8 +19,13 @@ public final class Lifetime {
 
 	/// MARK: Instance properties
 
+	private let _ended: Signal<(), NoError>
+
 	/// A signal that sends a `completed` event when the lifetime ends.
-	public let ended: Signal<(), NoError>
+	@available(*, deprecated, message:"Use `Lifetime.observeEnded` instead.")
+	public var ended: Signal<(), NoError> {
+		return _ended
+	}
 
 	/// MARK: Initializers
 
@@ -29,7 +34,7 @@ public final class Lifetime {
 	/// - parameters:
 	///   - signal: The ended signal.
 	private init(ended signal: Signal<(), NoError>) {
-		ended = signal
+		_ended = signal
 	}
 
 	/// Initialize a `Lifetime` from a lifetime token, which is expected to be
@@ -43,6 +48,18 @@ public final class Lifetime {
 	///            associated object.
 	public convenience init(_ token: Token) {
 		self.init(ended: token.ended)
+	}
+
+	/// Observe the termination of `self`.
+	///
+	/// - parameters:
+	///   - action: The action to be invoked when `self` ends.
+	///
+	/// - returns: A disposable that detaches `action` from the lifetime, or `nil`
+	///            if `lifetime` has already ended.
+	@discardableResult
+	public func observeEnded(_ action: @escaping () -> Void) -> Disposable? {
+		return _ended.observe(Observer(terminated: action))
 	}
 
 	/// A token object which completes its signal when it deinitializes.
