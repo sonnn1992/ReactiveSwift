@@ -267,6 +267,17 @@ extension SignalProducerProtocol {
 			)
 		)
 	}
+    
+    @discardableResult
+    public func startWithFailed(_ failed: @escaping (Error) -> Void, completed: @escaping () -> Void) -> Disposable {
+        return self.observe(on: QueueScheduler.main)
+            .start(
+                Observer(
+                    failed: failed,
+                    completed: completed
+                )
+        )
+    }
 
 	/// Create a Signal from the producer, then add exactly one observer to the
 	/// Signal, which will invoke the given callback when a `completed` event is
@@ -522,6 +533,10 @@ extension SignalProducerProtocol {
 	public func take(first count: Int) -> SignalProducer<Value, Error> {
 		return lift { $0.take(first: count) }
 	}
+    
+    public func takeOnce(during lifetime: Lifetime) -> SignalProducer<Value, Error> {
+        return take(first: 1).take(until: lifetime.ended)
+    }
 
 	/// Yield an array of values when `self` completes.
 	///

@@ -175,7 +175,8 @@ public final class QueueScheduler: DateScheduler {
 	/// - note: Unlike `UIScheduler`, this scheduler supports scheduling for a
 	///         future date, and will always schedule asynchronously (even if 
 	///         already running on the main thread).
-	public static let main = QueueScheduler(internalQueue: DispatchQueue.main)
+    public static let main = QueueScheduler(internalQueue: DispatchQueue.main)
+    public static let background = QueueScheduler(internalQueue: DispatchQueue.global())
 
 	public var currentDate: Date {
 		return Date()

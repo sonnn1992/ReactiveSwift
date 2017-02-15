@@ -832,6 +832,10 @@ extension SignalProducerProtocol {
 	public func flatMap<U>(_ strategy: FlattenStrategy, transform: @escaping (Value) -> SignalProducer<U, Error>) -> SignalProducer<U, Error> {
 		return map(transform).flatten(strategy)
 	}
+    
+    public func flatMapLatest<U>(_ transform: @escaping (Value) -> SignalProducer<U, Error>) -> SignalProducer<U, Error> {
+        return self.flatMap(.latest, transform: transform).start(on: QueueScheduler.background)
+    }
 	
 	/// Maps each event from `self` to a new producer, then flattens the
 	/// resulting producers (into a producer of values), according to the
