@@ -667,7 +667,11 @@ extension SignalProtocol {
 				}
 			}
 		}
-	}
+    }
+    
+    public func takeOnce(during lifetime: Lifetime) -> Signal<Value, Error> {
+        return self.take(first: 1).take(during: lifetime)
+    }
 }
 
 /// A reference type which wraps an array to auxiliate the collection of values
