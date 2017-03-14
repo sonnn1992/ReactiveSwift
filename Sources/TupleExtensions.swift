@@ -40,3 +40,11 @@ internal func repack<A, B, C, D, E, F, G, H, I>(_ t: (A, B, C, D, E, F, G, H), v
 internal func repack<A, B, C, D, E, F, G, H, I, J>(_ t: (A, B, C, D, E, F, G, H, I), value: J) -> (A, B, C, D, E, F, G, H, I, J) {
 	return (t.0, t.1, t.2, t.3, t.4, t.5, t.6, t.7, t.8, value)
 }
+
+internal func repack<A, B, C, D, E, F, G, H, I, J, K>(_ t: (A, B, C, D, E, F, G, H, I, J), value: K) -> (A, B, C, D, E, F, G, H, I, J, K) {
+	return (t.0, t.1, t.2, t.3, t.4, t.5, t.6, t.7, t.8, t.9, value)
+}
+
+internal func repack<A, B, C, D, E, F, G, H, I, J, K, L>(_ t: (A, B, C, D, E, F, G, H, I, J, K), value: L) -> (A, B, C, D, E, F, G, H, I, J, K, L) {
+	return (t.0, t.1, t.2, t.3, t.4, t.5, t.6, t.7, t.8, t.9, t.10, value)
+}
