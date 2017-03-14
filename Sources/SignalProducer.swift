@@ -1564,7 +1564,23 @@ extension SignalProducerProtocol {
 		return combineLatest(a, b, c, d, e, f, g, h, i)
 			.combineLatest(with: j)
 			.map(repack)
-	}
+    }
+    
+    /// Combines the values of all the given producers, in the manner described by
+    /// `combineLatest(with:)`.
+    public static func combineLatest<B, C, D, E, F, G, H, I, J, K>(_ a: SignalProducer<Value, Error>, _ b: SignalProducer<B, Error>, _ c: SignalProducer<C, Error>, _ d: SignalProducer<D, Error>, _ e: SignalProducer<E, Error>, _ f: SignalProducer<F, Error>, _ g: SignalProducer<G, Error>, _ h: SignalProducer<H, Error>, _ i: SignalProducer<I, Error>, _ j: SignalProducer<J, Error>, _ k: SignalProducer<K, Error>) -> SignalProducer<(Value, B, C, D, E, F, G, H, I, J, K), Error> {
+        return combineLatest(a, b, c, d, e, f, g, h, i, j)
+            .combineLatest(with: k)
+            .map(repack)
+    }
+    
+    /// Combines the values of all the given producers, in the manner described by
+    /// `combineLatest(with:)`.
+    public static func combineLatest<B, C, D, E, F, G, H, I, J, K, L>(_ a: SignalProducer<Value, Error>, _ b: SignalProducer<B, Error>, _ c: SignalProducer<C, Error>, _ d: SignalProducer<D, Error>, _ e: SignalProducer<E, Error>, _ f: SignalProducer<F, Error>, _ g: SignalProducer<G, Error>, _ h: SignalProducer<H, Error>, _ i: SignalProducer<I, Error>, _ j: SignalProducer<J, Error>, _ k: SignalProducer<K, Error>, _ l: SignalProducer<L, Error>) -> SignalProducer<(Value, B, C, D, E, F, G, H, I, J, K, L), Error> {
+        return combineLatest(a, b, c, d, e, f, g, h, i, j, k)
+            .combineLatest(with: l)
+            .map(repack)
+    }
 
 	/// Combines the values of all the given producers, in the manner described by
 	/// `combineLatest(with:)`. Will return an empty `SignalProducer` if the sequence is empty.
