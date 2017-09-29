@@ -19,7 +19,7 @@ import Result
 ///    2. it has no active observers, and is not being retained.
 public final class Signal<Value, Error: Swift.Error> {
     public typealias Observer = ReactiveSwift.Observer<Value, Error>
-    public typealias SignalPipe = (Signal, Observer)
+    public typealias Pipe = (Signal, Observer)
 
 	/// The disposable returned by the signal generator. It would be disposed of
 	/// when the signal terminates.
