@@ -328,16 +328,6 @@ public final class Signal<Value, Error: Swift.Error> {
 			return nil
 		}
 	}
-	
-	
-	public func send(value: Value) {
-		self.signal.send(value: value)
-	}
-	
-	@discardableResult
-	public func observeOnMain(_ value: @escaping (Value) -> Void) -> Disposable? {
-		return self.observeOnMain(value)
-	}
 }
 
 /// The state of a `Signal`.
