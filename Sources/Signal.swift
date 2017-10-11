@@ -517,6 +517,12 @@ extension SignalProtocol where Error == NoError {
 	public func observeValues(_ value: @escaping (Value) -> Void) -> Disposable? {
 		return observe(Observer(value: value))
 	}
+	
+	
+	@discardableResult
+	public func observeOnMain(_ value: @escaping (Value) -> Void) -> Disposable? {
+		return self.take(during: Lifetime(Lifetime.Token())).observe(on: QueueScheduler.main).observeValues(value)
+	}
 }
 
 extension SignalProtocol {
