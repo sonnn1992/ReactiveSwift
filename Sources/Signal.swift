@@ -520,7 +520,7 @@ extension SignalProtocol where Error == NoError {
 	
 	
 	@discardableResult
-	public func observeOnMain(during lifetime: Lifetime, value: @escaping (Value) -> Void) -> Disposable? {
+	public func observeOnMain(during lifetime: Lifetime, _ value: @escaping (Value) -> Void) -> Disposable? {
 		return self.take(during: lifetime).observe(on: QueueScheduler.main).observeValues(value)
 	}
 }
